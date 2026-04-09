@@ -1,0 +1,7 @@
+*.so
+*.dylib
+build/
+assets/
+
+README.tex
+README.pdf

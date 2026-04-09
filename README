@@ -1,0 +1,395 @@
+# -*- mode:org; mode:auto-fill; fill-column:80; coding:utf-8; -*-
+#+title: dawa-tts - Lightning-fast TTS for Emacs
+#+author: Sangjee Dondrub
+
+* Overview
+
+*dawa-tts* is an Emacs dynamic module that brings ultra-fast text-to-speech
+synthesis to Emacs using the [[https://github.com/supertone-inc/supertonic][Supertonic TTS engine]]. It provides on-device
+speech synthesis with zero latency and complete privacy.
+
+* Features
+
+- *Blazingly Fast*: Generates speech up to 167× faster than real-time
+  (< 0.2s for typical sentences)
+- *Ultra Lightweight*: Only 66M parameter model
+- *On-Device*: Complete privacy, no cloud, no API calls
+- *Multiple Voices*: 10 voice styles (M1-M5 male, F1-F5 female)
+- *Natural Text Handling*: Seamlessly handles numbers, dates, currency,
+  abbreviations
+- *Progressive Word Highlighting*: Highlights each word as it's being spoken
+  (like read-aloud.el)
+-  *Configurable*: Adjust inference steps, speed, voice styles, and highlight
+  colors
+
+* Performance
+
+On M4 Pro (CPU):
+- *Speed*: 0.12-0.16 seconds for typical sentences
+- *Throughput*: 1000+ characters/second
+- *Real-time Factor*: 0.012 (generates 1 second of audio in 0.012 seconds)
+
+* Installation
+
+** Prerequisites
+
+1. *Emacs 25.1+* with dynamic module support
+2. *Dependencies* (macOS):
+
+#+begin_src shell
+brew install cmake nlohmann-json onnxruntime git-lfs
+git lfs install
+#+end_src
+
+** Clone and Setup
+
+#+begin_src shell
+cd ~/.emacs.d/etc/lisp/
+git clone <this-repo> dawa-tts
+#+end_src
+
+** Emacs Configuration
+
+Add to your =init.el=:
+
+#+begin_src elisp
+(add-to-list 'load-path "~/.emacs.d/etc/lisp/dawa-tts/")
+(require 'dawa-tts)
+#+end_src
+
+*The module will automatically compile on first load!*
+
+When you first =(require 'dawa-tts)=, Emacs will:
+1. Check if the module needs compilation
+2. Ask for confirmation: "dawa-tts module needs compilation. Compile now?"
+3. Run CMake to build the module
+4. Download assets if needed (via CMake)
+5. Load the compiled module
+
+** Using use-package
+
+If you prefer using =use-package= for configuration:
+
+#+begin_src elisp
+(use-package dawa-tts
+  :load-path "~/.emacs.d/etc/lisp/dawa-tts/"
+  :commands (dawa-tts-speak
+             dawa-tts-speak-word
+             dawa-tts-speak-sentence
+             dawa-tts-speak-region
+             dawa-tts-speak-buffer
+             dawa-tts-stop
+             dawa-tts-load-voice
+             dawa-tts-toggle-highlight)
+  :init
+  ;; Optional: Set default voice before loading
+  (setq dawa-tts-voice-style "F1")
+  :config
+  ;; Adjust synthesis quality (2-10, default: 5)
+  (setq dawa-tts-inference-steps 5)
+  ;; Adjust speech speed (0.5-2.0, default: 1.05)
+  (setq dawa-tts-speed 1.05)
+  ;; Enable text highlighting (default: t)
+  (setq dawa-tts-highlight-text t)
+
+  ;; Optional: Set keybindings
+  (global-set-key (kbd "C-c s s") 'dawa-tts-speak)
+  (global-set-key (kbd "C-c s w") 'dawa-tts-speak-word)
+  (global-set-key (kbd "C-c s r") 'dawa-tts-speak-region)
+  (global-set-key (kbd "C-c s b") 'dawa-tts-speak-buffer)
+  (global-set-key (kbd "C-c s q") 'dawa-tts-stop)
+  (global-set-key (kbd "C-c s v") 'dawa-tts-load-voice)
+  (global-set-key (kbd "C-c s h") 'dawa-tts-toggle-highlight))
+#+end_src
+
+*Note:* The module will automatically compile on first load, even when loaded via
+=use-package=. You'll be prompted to confirm compilation if the module is
+missing or out of date.
+
+** Manual Building (Optional)
+
+If you prefer to build manually before loading:
+
+#+begin_src shell
+cd ~/.emacs.d/etc/lisp/dawa-tts/
+mkdir build
+cd build
+cmake ..
+cmake --build . --config Release
+#+end_src
+
+Or use the interactive command:
+
+#+begin_src elisp
+M-x dawa-tts-compile
+#+end_src
+
+* Usage
+
+** Basic Usage
+
+#+begin_src elisp
+;; Speak text directly
+(dawa-tts-speak "Hello from Emacs")
+
+;; Speak current word (highlights the word)
+(dawa-tts-speak-word)
+
+;; Speak selected region (progressively highlights each word)
+(dawa-tts-speak-region)
+
+;; Speak entire buffer (progressively highlights each word)
+(dawa-tts-speak-buffer)
+
+;; Stop playback
+(dawa-tts-stop)
+#+end_src
+
+** Voice Configuration
+
+#+begin_src elisp
+;; List available voices
+(dawa-tts-list-voices)
+;; => ("M1" "M2" "M3" "M4" "M5" "F1" "F2" "F3" "F4" "F5")
+
+;; Switch voice interactively
+M-x dawa-tts-load-voice RET M2 RET
+
+;; Or programmatically
+(dawa-tts-load-voice "F3")
+
+;; Set default voice
+(setq dawa-tts-voice-style "M1")
+#+end_src
+
+** Advanced Configuration
+
+#+begin_src elisp
+;; Adjust synthesis quality (2-10, default: 5)
+;; Higher = better quality but slower
+(setq dawa-tts-inference-steps 7)
+
+;; Adjust speech speed (0.5-2.0, default: 1.05)
+(setq dawa-tts-speed 1.2)
+
+;; Disable auto-play (just generate WAV files)
+(setq dawa-tts-auto-play nil)
+
+;; Custom audio player (Linux)
+(setq dawa-tts-player-command "aplay")
+
+;; Disable text highlighting
+(setq dawa-tts-highlight-text nil)
+
+;; Customize highlight face
+(set-face-attribute 'dawa-tts-highlight-face nil
+                    :background "light blue"
+                    :foreground "black")
+#+end_src
+
+** Text Highlighting
+
+The progressive sentence highlighting feature provides visual feedback during speech
+synthesis:
+
+- *Single word* (=dawa-tts-speak-word=): Highlights the word being spoken
+- *Single sentence* (=dawa-tts-speak-sentence=): Highlights the sentence being spoken
+- *Region/Buffer* (=dawa-tts-speak-region=, =dawa-tts-speak-buffer=):
+  Progressively highlights each sentence as it's spoken, synchronized with audio
+  playback. Sentence-level highlighting provides better accuracy than word-level
+  highlighting since each sentence's duration is estimated individually based on
+  character count and speech rate.
+- Highlighting automatically disappears when playback finishes or is stopped
+
+Toggle highlighting: =M-x dawa-tts-toggle-highlight=
+
+** Keybindings (Example)
+
+#+begin_src elisp
+(global-set-key (kbd "C-c s s") 'dawa-tts-speak)
+(global-set-key (kbd "C-c s w") 'dawa-tts-speak-word)
+(global-set-key (kbd "C-c s r") 'dawa-tts-speak-region)
+(global-set-key (kbd "C-c s b") 'dawa-tts-speak-buffer)
+(global-set-key (kbd "C-c s q") 'dawa-tts-stop)
+(global-set-key (kbd "C-c s v") 'dawa-tts-load-voice)
+(global-set-key (kbd "C-c s h") 'dawa-tts-toggle-highlight)
+#+end_src
+
+* Architecture
+
+#+begin_example
+┌─────────────────────┐
+│   dawa-tts.el       │  ← Emacs Lisp interface
+│  (User commands)    │
+└──────────┬──────────┘
+           │ require
+┌──────────▼──────────┐
+│ dawa-tts-module.dylib│  ← C++ dynamic module
+│ (Emacs ↔ C++ bridge)│
+└──────────┬──────────┘
+           │ calls
+┌──────────▼──────────┐
+│  Supertonic C++     │  ← TTS engine (lib/supertonic.cpp)
+│  TTS Implementation │
+└──────────┬──────────┘
+           │ uses
+┌──────────▼──────────┐
+│  ONNX Runtime       │  ← ML inference
+│  (4 neural models)  │
+└─────────────────────┘
+#+end_example
+
+* File Structure
+
+#+begin_example
+dawa-tts/
+├── CMakeLists.txt           # CMake build configuration
+├── dawa-tts.el              # Emacs Lisp interface
+├── dawa-tts-module.cpp      # C++ dynamic module
+├── dawa-tts-module.dylib    # Compiled module (macOS)
+├── lib/                     # Supertonic TTS library
+│   ├── supertonic.cpp       # Core TTS implementation
+│   └── supertonic.h         # TTS API headers
+├── build/                   # CMake build directory (gitignored)
+└── assets/                  # Models and voices (auto-downloaded, gitignored)
+    ├── onnx/                # ONNX model files (260MB total)
+    │   ├── duration_predictor.onnx
+    │   ├── text_encoder.onnx
+    │   ├── vector_estimator.onnx
+    │   ├── vocoder.onnx
+    │   ├── tts.json
+    │   └── unicode_indexer.json
+    └── voice_styles/        # Voice embeddings (10 voices)
+        ├── F1.json
+        ├── F2.json
+        ⋮
+        └── M5.json
+#+end_example
+
+* Development
+
+** Building from Source
+
+#+begin_src shell
+# Clean rebuild
+cd build
+rm ./*
+cmake ..
+cmake --build . --config Release
+#+end_src
+
+** Testing
+
+#+begin_src shell
+# Test module loading
+emacs -Q --batch -L . -l dawa-tts.el \
+  --eval "(message \"Module loaded: %s\" (fboundp 'dawa-tts-speak))"
+
+# Test synthesis
+emacs -Q --batch -L . -l dawa-tts.el \
+  --eval "(dawa-tts-speak \"Test\")"
+#+end_src
+
+** Troubleshooting
+
+*** Module won't load
+
+#+begin_src shell
+# Check if Emacs has module support
+emacs --batch --eval "(message \"%s\" module-file-suffix)"
+# Should output: .dylib (macOS) or .so (Linux)
+#+end_src
+
+*** ONNX Runtime errors
+
+#+begin_src shell
+# Verify ONNX Runtime installation
+brew list onnxruntime
+ls -la /opt/homebrew/lib/libonnxruntime.dylib
+#+end_src
+
+*** Missing models
+
+Assets are automatically downloaded during CMake configuration. To manually
+download:
+
+#+begin_src shell
+git clone https://huggingface.co/Supertone/supertonic assets
+cd assets
+git lfs pull
+#+end_src
+
+* API Reference
+
+** Interactive Commands
+
+- =dawa-tts-speak= - Synthesize and speak text
+- =dawa-tts-speak-word= - Speak word at point (with highlighting)
+- =dawa-tts-speak-sentence= - Speak sentence at point (with highlighting)
+- =dawa-tts-speak-region= - Speak selected region (with progressive highlighting)
+- =dawa-tts-speak-buffer= - Speak entire buffer (with progressive highlighting)
+- =dawa-tts-stop= - Stop current playback and remove highlight
+- =dawa-tts-load-voice= - Switch voice style
+- =dawa-tts-toggle-highlight= - Toggle text highlighting on/off
+- =dawa-tts-init= - Initialize TTS engine (auto-called)
+- =dawa-tts-benchmark= - Run performance benchmark
+- =dawa-tts-cleanup-temp-files= - Clean up temporary WAV files
+
+** Customization Variables
+
+- =dawa-tts-voice-style= - Default voice (default: "F1")
+- =dawa-tts-inference-steps= - Quality/speed tradeoff (default: 5)
+- =dawa-tts-speed= - Speech speed multiplier (default: 1.05)
+- =dawa-tts-auto-play= - Auto-play generated audio (default: t)
+- =dawa-tts-highlight-text= - Highlight text being spoken (default: t)
+- =dawa-tts-assets-dir= - Path to models and voices
+- =dawa-tts-player-command= - Audio player command (default: "afplay")
+
+** Faces
+
+- =dawa-tts-highlight-face= - Face for highlighting spoken text (default: yellow
+  background)
+
+** Module Functions (Low-level)
+
+- =(dawa-tts-module-init ONNX-DIR)= - Initialize ONNX Runtime
+- =(dawa-tts-module-load-voice VOICE-PATH)= - Load voice JSON
+- =(dawa-tts-module-synthesize TEXT STEPS SPEED OUTPUT-PATH)= - Generate WAV
+- =(dawa-tts-module-list-voices VOICE-DIR)= - List voice files
+- =(dawa-tts-module-cleanup)= - Clean up resources
+
+* Performance Tips
+
+1. *Use fewer inference steps* for speed: =(setq dawa-tts-inference-steps 2)=
+2. *Increase speech speed*: =(setq dawa-tts-speed 1.3)=
+3. *Disable auto-play* for batch processing: =(setq dawa-tts-auto-play nil)=
+4. *Keep the engine initialized* - first synthesis takes ~1s (loads models),
+   subsequent ones are ~0.1s
+
+* Known Issues
+
+- Mutex cleanup warning on exit (non-critical, synthesis works correctly)
+- Long texts (>300 chars) are automatically chunked with 0.3s silence
+
+* Todos
+
+- [X] Split sentences and the highlight the sentences instead of words, for more
+  accuracy
+- [X] Add document to load using =use-package=
+
+* Attribution
+
+This project includes code derived from [[https://github.com/supertone-inc/supertonic][Supertonic TTS]] by Supertone Inc.,
+licensed under Apache 2.0. The core TTS implementation (=lib/supertonic.cpp= and
+=lib/supertonic.h=) is adapted from the original Supertonic C++ codebase.
+
+* Credits
+
+- *Supertonic TTS*: https://github.com/supertone-inc/supertonic (Apache 2.0)
+- *ONNX Runtime*: https://onnxruntime.ai/
+- Inspired by =read-aloud.el=
+
+* License
+
+MIT License (code)
+OpenRAIL-M License (Supertonic models)
