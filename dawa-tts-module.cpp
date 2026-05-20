@@ -151,7 +151,7 @@ Fdawa_tts_module_load_voice(emacs_env *env, ptrdiff_t nargs, emacs_value args[],
     }
 }
 
-// (dawa-tts-module-synthesize TEXT STEPS SPEED OUTPUT-PATH) -> path-string or nil
+// (dawa-tts-module-synthesize TEXT LANG STEPS SPEED OUTPUT-PATH) -> path-string or nil
 // OUTPUT-PATH can be nil for auto-generated path
 static emacs_value
 Fdawa_tts_module_synthesize(emacs_env *env, ptrdiff_t nargs, emacs_value args[], void *data) noexcept {
@@ -171,13 +171,14 @@ Fdawa_tts_module_synthesize(emacs_env *env, ptrdiff_t nargs, emacs_value args[],
     try {
         // Extract arguments
         std::string text = extract_string(env, args[0]);
-        int steps = env->extract_integer(env, args[1]);
-        double speed = env->extract_float(env, args[2]);
+        std::string lang = extract_string(env, args[1]);
+        int steps = env->extract_integer(env, args[2]);
+        double speed = env->extract_float(env, args[3]);
 
         // Determine output path
         std::string output_path;
-        if (env->is_not_nil(env, args[3])) {
-            output_path = extract_string(env, args[3]);
+        if (env->is_not_nil(env, args[4])) {
+            output_path = extract_string(env, args[4]);
         } else {
             output_path = generate_temp_wav_path();
         }
@@ -198,8 +199,8 @@ Fdawa_tts_module_synthesize(emacs_env *env, ptrdiff_t nargs, emacs_value args[],
             return env->intern(env, "nil");
         }
 
-        // Synthesize speech
-        auto result = g_tts->call(*g_memory_info, text, *g_current_style, steps,
+        // Synthesize speech with language parameter
+        auto result = g_tts->call(*g_memory_info, text, lang, *g_current_style, steps,
                                    static_cast<float>(speed), 0.3f);
 
         // Write WAV file
@@ -309,8 +310,8 @@ int emacs_module_init(struct emacs_runtime *ert) noexcept {
     defun("dawa-tts-module-load-voice", 1, 1, Fdawa_tts_module_load_voice,
           "Load voice style from VOICE-PATH (JSON file).");
 
-    defun("dawa-tts-module-synthesize", 4, 4, Fdawa_tts_module_synthesize,
-          "Synthesize TEXT to speech with STEPS inference steps, SPEED multiplier,\n\
+    defun("dawa-tts-module-synthesize", 5, 5, Fdawa_tts_module_synthesize,
+          "Synthesize TEXT in LANG to speech with STEPS inference steps, SPEED multiplier,\n\
 and save to OUTPUT-PATH. Returns path to generated WAV file.");
 
     defun("dawa-tts-module-list-voices", 1, 1, Fdawa_tts_module_list_voices,

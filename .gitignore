@@ -2,6 +2,7 @@
 *.dylib
 build/
 assets/
+tmp/
 
 README.tex
 README.pdf

@@ -102,6 +102,8 @@ This is called automatically when the module is missing or out of date."
 ;; Auto-compile and load module
 (dawa-tts--ensure-module-compiled)
 (require 'dawa-tts-module)
+(require 'dawa-tts-lang)
+(require 'dawa-tts-chunk)
 
 ;;; Configuration
 
@@ -112,7 +114,8 @@ This is called automatically when the module is missing or out of date."
 
 (defcustom dawa-tts-voice-style "F1"
   "Default voice style.
-Available voices: M1, M2, M3, M4, M5 (male), F1, F2, F3, F4, F5 (female)."
+Available voices: M1, M2, M3, M4, M5 (male), F1, F2, F3, F4, F5 (female).
+F5 & M5 are British."
   :type '(choice (const "M1") (const "M2") (const "M3") (const "M4") (const "M5")
                  (const "F1") (const "F2") (const "F3") (const "F4") (const "F5"))
   :group 'dawa-tts)
@@ -180,14 +183,14 @@ On Linux: \"aplay\" or \"paplay\" (PulseAudio)"
 (defvar dawa-tts--text-position nil
   "Position (start . end) of text being spoken.")
 
-(defvar dawa-tts--sentence-positions nil
-  "List of sentence positions (start . end) for progressive highlighting.")
+(defvar dawa-tts--chunk-positions nil
+  "List of chunk positions (start end text) for progressive highlighting.")
 
-(defvar dawa-tts--current-sentence-index 0
-  "Index of currently highlighted sentence.")
+(defvar dawa-tts--current-chunk-index 0
+  "Index of currently highlighted chunk.")
 
 (defvar dawa-tts--highlight-timer nil
-  "Timer for progressive sentence highlighting.")
+  "Timer for progressive chunk highlighting.")
 
 ;;; Helper Functions
 
@@ -211,95 +214,55 @@ On Linux: \"aplay\" or \"paplay\" (PulseAudio)"
     (setq dawa-tts--source-buffer nil)
     (setq dawa-tts--text-position nil)))
 
-(defun dawa-tts--parse-sentence-positions (text start)
-  "Parse TEXT into sentence positions starting from START.
-Returns a list of (sentence-start . sentence-end) cons cells.
-Uses Emacs built-in sentence navigation for accurate parsing."
-  (let ((positions nil))
-    (with-temp-buffer
-      (insert text)
-      (goto-char (point-min))
-      (while (not (eobp))
-        (let ((sentence-start (+ start (1- (point)))))
-          (forward-sentence)
-          (let ((sentence-end (+ start (1- (point)))))
-            (when (> sentence-end sentence-start)
-              (push (cons sentence-start sentence-end) positions))))))
-    (nreverse positions)))
-
-(defun dawa-tts--parse-sentence-positions-with-text (text start buffer)
-  "Parse TEXT into sentence positions with text content.
-START is the starting position in BUFFER.
-Returns a list of (start end . text) elements for progressive highlighting."
-  (let ((positions nil))
-    (with-current-buffer buffer
-      (save-excursion
-        (goto-char start)
-        (let ((text-end (+ start (length text))))
-          (while (and (< (point) text-end) (not (eobp)))
-            (let ((sentence-start (point)))
-              (forward-sentence)
-              (let* ((sentence-end (min (point) text-end))
-                     (sentence-text (buffer-substring-no-properties sentence-start sentence-end)))
-                (when (> sentence-end sentence-start)
-                  (push (list sentence-start sentence-end sentence-text) positions))))))))
-    (nreverse positions)))
-
-(defun dawa-tts--estimate-sentence-duration (sentence-text)
-  "Estimate audio duration in seconds for a single SENTENCE-TEXT.
-Based on character count and speech rate."
-  (let* ((char-count (length sentence-text))
-         ;; Average speech rate: ~12.5 chars/sec of audio
-         (base-duration (/ char-count 12.5))
-         ;; Adjust for speed setting
-         (adjusted-duration (/ base-duration dawa-tts-speed)))
-    (max 0.5 adjusted-duration)))  ; Minimum 0.5s per sentence
-
-(defun dawa-tts--start-progressive-highlight (sentence-positions-with-text)
-  "Start progressive sentence highlighting.
-SENTENCE-POSITIONS-WITH-TEXT is a list of (start . end . text) elements,
-where each element contains the start position, end position, and text content
-of a sentence. Each sentence's duration is estimated individually for better accuracy."
+(defun dawa-tts--start-progressive-highlight (chunk-positions lang)
+  "Start progressive chunk highlighting.
+CHUNK-POSITIONS is a list of (start end text) elements.
+LANG is the language code for duration estimation."
   (dawa-tts--stop-progressive-highlight)
-  (when (and sentence-positions-with-text dawa-tts-highlight-text
+  (when (and chunk-positions dawa-tts-highlight-text
              (buffer-live-p dawa-tts--source-buffer))
-    (setq dawa-tts--sentence-positions sentence-positions-with-text)
-    (setq dawa-tts--current-sentence-index 0)
-    ;; Highlight first sentence immediately
-    (dawa-tts--highlight-current-sentence)
-    ;; Schedule remaining sentences based on individual durations
-    (dawa-tts--schedule-next-sentence)))
+    (setq dawa-tts--chunk-positions chunk-positions)
+    (setq dawa-tts--current-chunk-index 0)
+    ;; Highlight first chunk immediately
+    (dawa-tts--highlight-current-chunk lang)
+    ;; Schedule remaining chunks
+    (dawa-tts--schedule-next-chunk lang)))
 
-(defun dawa-tts--schedule-next-sentence ()
-  "Schedule the next sentence highlighting based on current sentence duration."
-  (when (and dawa-tts--sentence-positions
-             (< dawa-tts--current-sentence-index (length dawa-tts--sentence-positions)))
-    (let* ((current-sentence (nth dawa-tts--current-sentence-index dawa-tts--sentence-positions))
-           (sentence-text (nth 2 current-sentence))  ; Third element is the text
-           (duration (dawa-tts--estimate-sentence-duration sentence-text)))
-      ;; Schedule next sentence after estimated duration
+(defun dawa-tts--schedule-next-chunk (lang)
+  "Schedule the next chunk highlighting based on current chunk duration.
+LANG is the language code for duration estimation."
+  (when (and dawa-tts--chunk-positions
+             (< dawa-tts--current-chunk-index (length dawa-tts--chunk-positions)))
+    (let* ((current-chunk (nth dawa-tts--current-chunk-index dawa-tts--chunk-positions))
+           (chunk-text (nth 2 current-chunk))
+           (duration (dawa-tts-chunk-estimate-duration chunk-text lang)))
+      ;; Adjust for speed setting
+      (setq duration (/ duration dawa-tts-speed))
+      ;; Schedule next chunk after estimated duration
       (setq dawa-tts--highlight-timer
-            (run-at-time duration nil #'dawa-tts--highlight-next-sentence)))))
+            (run-at-time duration nil #'dawa-tts--highlight-next-chunk lang)))))
 
-(defun dawa-tts--highlight-current-sentence ()
-  "Highlight the sentence at current index."
-  (when (and dawa-tts--sentence-positions
-             (< dawa-tts--current-sentence-index (length dawa-tts--sentence-positions))
+(defun dawa-tts--highlight-current-chunk (lang)
+  "Highlight the chunk at current index.
+LANG is passed for consistency but not used here."
+  (when (and dawa-tts--chunk-positions
+             (< dawa-tts--current-chunk-index (length dawa-tts--chunk-positions))
              (buffer-live-p dawa-tts--source-buffer))
     (with-current-buffer dawa-tts--source-buffer
-      (let* ((sentence-pos (nth dawa-tts--current-sentence-index dawa-tts--sentence-positions))
-             (start (nth 0 sentence-pos))
-             (end (nth 1 sentence-pos)))
+      (let* ((chunk-pos (nth dawa-tts--current-chunk-index dawa-tts--chunk-positions))
+             (start (nth 0 chunk-pos))
+             (end (nth 1 chunk-pos)))
         (dawa-tts--make-overlay start end)))))
 
-(defun dawa-tts--highlight-next-sentence ()
-  "Advance to next sentence and highlight it."
-  (setq dawa-tts--current-sentence-index (1+ dawa-tts--current-sentence-index))
-  (if (< dawa-tts--current-sentence-index (length dawa-tts--sentence-positions))
+(defun dawa-tts--highlight-next-chunk (lang)
+  "Advance to next chunk and highlight it.
+LANG is the language code for duration estimation."
+  (setq dawa-tts--current-chunk-index (1+ dawa-tts--current-chunk-index))
+  (if (< dawa-tts--current-chunk-index (length dawa-tts--chunk-positions))
       (progn
-        (dawa-tts--highlight-current-sentence)
-        (dawa-tts--schedule-next-sentence))
-    ;; Done with all sentences, stop the timer
+        (dawa-tts--highlight-current-chunk lang)
+        (dawa-tts--schedule-next-chunk lang))
+    ;; Done with all chunks, stop the timer
     (dawa-tts--stop-progressive-highlight)))
 
 (defun dawa-tts--stop-progressive-highlight ()
@@ -307,8 +270,8 @@ of a sentence. Each sentence's duration is estimated individually for better acc
   (when dawa-tts--highlight-timer
     (cancel-timer dawa-tts--highlight-timer)
     (setq dawa-tts--highlight-timer nil))
-  (setq dawa-tts--sentence-positions nil)
-  (setq dawa-tts--current-sentence-index 0))
+  (setq dawa-tts--chunk-positions nil)
+  (setq dawa-tts--current-chunk-index 0))
 
 (defun dawa-tts--estimate-audio-duration (text)
   "Estimate audio duration in seconds for TEXT.
@@ -364,9 +327,18 @@ Available voices: M1-M5 (male), F1-F5 (female)."
           (message "Voice %s loaded successfully" voice))
       (error "Failed to load voice: %s" voice))))
 
+(defun dawa-tts--normalize-language (lang)
+  "Normalize language code LANG for Supertonic compatibility.
+Maps 'zh' (Chinese) to 'na' (language-agnostic) since Chinese
+is not officially supported by Supertonic v3."
+  (if (equal lang "zh")
+      "na"
+    lang))
+
 ;;;###autoload
-(defun dawa-tts-speak (text)
-  "Synthesize and speak TEXT.
+(defun dawa-tts-speak (text &optional lang)
+  "Synthesize and speak TEXT in language LANG.
+LANG defaults to auto-detected language or `dawa-tts-lang-default'.
 Uses current voice style and synthesis parameters."
   (interactive "sText to speak: ")
   (dawa-tts--ensure-initialized)
@@ -374,20 +346,26 @@ Uses current voice style and synthesis parameters."
   (when (string-empty-p text)
     (user-error "Text cannot be empty"))
 
-  (message "Synthesizing speech...")
-  (let* ((wav-path (dawa-tts-module-synthesize
-                    text
-                    dawa-tts-inference-steps
-                    dawa-tts-speed
-                    nil))  ; nil = auto-generate temp path
-         (success (and wav-path (stringp wav-path) (file-exists-p wav-path))))
-    (if success
-        (progn
-          (push wav-path dawa-tts--temp-files)
-          (message "Generated: %s" wav-path)
-          (when dawa-tts-auto-play
-            (dawa-tts-play-file wav-path)))
-      (error "Failed to synthesize speech"))))
+  ;; Determine and normalize language
+  (let ((language (dawa-tts--normalize-language
+                   (or lang
+                       dawa-tts-lang-override
+                       (dawa-tts-lang-detect text)))))
+    (message "Synthesizing speech (lang: %s)..." language)
+    (let* ((wav-path (dawa-tts-module-synthesize
+                      text
+                      language
+                      dawa-tts-inference-steps
+                      dawa-tts-speed
+                      nil))  ; nil = auto-generate temp path
+           (success (and wav-path (stringp wav-path) (file-exists-p wav-path))))
+      (if success
+          (progn
+            (push wav-path dawa-tts--temp-files)
+            (message "Generated: %s" wav-path)
+            (when dawa-tts-auto-play
+              (dawa-tts-play-file wav-path)))
+        (error "Failed to synthesize speech")))))
 
 ;;;###autoload
 (defun dawa-tts-speak-word ()
@@ -413,35 +391,106 @@ Uses current voice style and synthesis parameters."
 
 ;;;###autoload
 (defun dawa-tts-speak-region (start end)
-  "Speak text in region from START to END with progressive sentence highlighting."
+  "Speak text in region from START to END with progressive chunk highlighting."
   (interactive "r")
   (if (use-region-p)
       (let* ((text (buffer-substring-no-properties start end))
-             (sentence-positions (dawa-tts--parse-sentence-positions-with-text
-                                 text start (current-buffer))))
+             (lang (or dawa-tts-lang-override
+                       (dawa-tts-lang-detect text)))
+             (chunk-positions (dawa-tts-chunk-text text start (current-buffer) lang)))
         ;; Store source buffer before synthesis
         (setq dawa-tts--source-buffer (current-buffer))
-        ;; Start progressive sentence highlighting
-        (when sentence-positions
-          (dawa-tts--start-progressive-highlight sentence-positions))
-        ;; Speak the text
-        (dawa-tts-speak text))
+        ;; Process chunks sequentially
+        (if chunk-positions
+            (dawa-tts--speak-chunks chunk-positions lang)
+          ;; Fallback: speak entire text if no chunks
+          (dawa-tts-speak text lang)))
     (user-error "No active region")))
 
 ;;;###autoload
 (defun dawa-tts-speak-buffer ()
-  "Speak entire buffer with progressive sentence highlighting."
+  "Speak entire buffer with progressive chunk highlighting."
   (interactive)
   (let* ((text (buffer-string))
-         (sentence-positions (dawa-tts--parse-sentence-positions-with-text
-                             text (point-min) (current-buffer))))
+         (lang (or dawa-tts-lang-override
+                   (dawa-tts-lang-detect text)))
+         (chunk-positions (dawa-tts-chunk-text text (point-min) (current-buffer) lang)))
     ;; Store source buffer before synthesis
     (setq dawa-tts--source-buffer (current-buffer))
-    ;; Start progressive sentence highlighting
-    (when sentence-positions
-      (dawa-tts--start-progressive-highlight sentence-positions))
-    ;; Speak the text
-    (dawa-tts-speak text)))
+    ;; Process chunks sequentially
+    (if chunk-positions
+        (dawa-tts--speak-chunks chunk-positions lang)
+      ;; Fallback: speak entire text if no chunks
+      (dawa-tts-speak text lang))))
+
+(defun dawa-tts--speak-chunks (chunks lang)
+  "Speak CHUNKS sequentially in language LANG.
+Each chunk is synthesized, played, and highlighted one by one."
+  (dawa-tts--ensure-initialized)
+  (dawa-tts-stop)  ; Stop any current playback
+
+  ;; Store chunks and language for sequential processing
+  (setq dawa-tts--chunk-positions chunks)
+  (setq dawa-tts--current-chunk-index 0)
+  (setq dawa-tts--chunk-language lang)
+
+  ;; Start processing first chunk
+  (dawa-tts--process-next-chunk))
+
+(defvar dawa-tts--chunk-language nil
+  "Language code for current chunk processing.")
+
+(defun dawa-tts--process-next-chunk ()
+  "Process the next chunk: synthesize, highlight, and play."
+  (if (>= dawa-tts--current-chunk-index (length dawa-tts--chunk-positions))
+      ;; All chunks done
+      (progn
+        (message "Finished speaking all chunks")
+        (dawa-tts--remove-overlay))
+    ;; Process current chunk
+    (let* ((chunk (nth dawa-tts--current-chunk-index dawa-tts--chunk-positions))
+           (start (nth 0 chunk))
+           (end (nth 1 chunk))
+           (text (nth 2 chunk))
+           (lang (dawa-tts--normalize-language dawa-tts--chunk-language)))
+
+      (message "Speaking chunk %d/%d (lang: %s)..."
+               (1+ dawa-tts--current-chunk-index)
+               (length dawa-tts--chunk-positions)
+               lang)
+
+      ;; Highlight current chunk
+      (when (and dawa-tts-highlight-text
+                 (buffer-live-p dawa-tts--source-buffer))
+        (with-current-buffer dawa-tts--source-buffer
+          (dawa-tts--make-overlay start end)))
+
+      ;; Synthesize chunk
+      (let ((wav-path (dawa-tts-module-synthesize
+                       text
+                       lang
+                       dawa-tts-inference-steps
+                       dawa-tts-speed
+                       nil)))  ; nil = auto-generate temp path
+        (if (and wav-path (stringp wav-path) (file-exists-p wav-path))
+            (progn
+              (push wav-path dawa-tts--temp-files)
+              ;; Play chunk and set up sentinel to process next chunk
+              (setq dawa-tts--current-process
+                    (start-process "dawa-tts-player" nil dawa-tts-player-command wav-path))
+              (set-process-sentinel dawa-tts--current-process
+                                    #'dawa-tts--chunk-player-sentinel))
+          (error "Failed to synthesize chunk %d" (1+ dawa-tts--current-chunk-index)))))))
+
+(defun dawa-tts--chunk-player-sentinel (process event)
+  "Sentinel for chunk-by-chunk audio player PROCESS.
+EVENT is the process event string."
+  (when (memq (process-status process) '(exit signal))
+    (setq dawa-tts--current-process nil)
+    ;; Move to next chunk
+    (setq dawa-tts--current-chunk-index (1+ dawa-tts--current-chunk-index))
+    ;; Process next chunk (or finish if done)
+    (dawa-tts--process-next-chunk)))
 
 (defun dawa-tts-play-file (wav-path)
   "Play WAV-PATH using system audio player."
@@ -458,10 +507,15 @@ Uses current voice style and synthesis parameters."
   (when (and dawa-tts--current-process
              (process-live-p dawa-tts--current-process))
     (kill-process dawa-tts--current-process)
-    (setq dawa-tts--current-process nil)
-    (dawa-tts--stop-progressive-highlight)
-    (dawa-tts--remove-overlay)
-    (message "Stopped playback")))
+    (setq dawa-tts--current-process nil))
+  ;; Reset chunk processing state
+  (setq dawa-tts--chunk-positions nil)
+  (setq dawa-tts--current-chunk-index 0)
+  (setq dawa-tts--chunk-language nil)
+  ;; Clean up highlighting
+  (dawa-tts--stop-progressive-highlight)
+  (dawa-tts--remove-overlay)
+  (message "Stopped playback"))
 
 (defun dawa-tts--player-sentinel (process event)
   "Sentinel for audio player PROCESS.
@@ -512,6 +566,7 @@ EVENT is the process event string."
          (start-time (current-time))
          (wav-path (dawa-tts-module-synthesize
                     test-text
+                    "en"  ; English for benchmark
                     dawa-tts-inference-steps
                     dawa-tts-speed
                     nil))

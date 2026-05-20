@@ -1,26 +1,39 @@
 # -*- mode:org; mode:auto-fill; fill-column:80; coding:utf-8; -*-
-#+title: dawa-tts - Lightning-fast TTS for Emacs
+#+title: dawa-tts - Lightning-fast Multilingual TTS for Emacs
 #+author: Sangjee Dondrub
 
 * Overview
 
-*dawa-tts* is an Emacs dynamic module that brings ultra-fast text-to-speech
-synthesis to Emacs using the [[https://github.com/supertone-inc/supertonic][Supertonic TTS engine]]. It provides on-device
-speech synthesis with zero latency and complete privacy.
+*dawa-tts* is an Emacs dynamic module that brings ultra-fast multilingual
+text-to-speech synthesis to Emacs using the [[https://github.com/supertone-inc/supertonic][Supertonic TTS engine v3]]. It
+provides on-device speech synthesis with zero latency and complete privacy.
 
 * Features
 
 - *Blazingly Fast*: Generates speech up to 167× faster than real-time
   (< 0.2s for typical sentences)
+- *Multilingual*: Supports 32 languages with automatic detection
 - *Ultra Lightweight*: Only 66M parameter model
 - *On-Device*: Complete privacy, no cloud, no API calls
 - *Multiple Voices*: 10 voice styles (M1-M5 male, F1-F5 female)
 - *Natural Text Handling*: Seamlessly handles numbers, dates, currency,
   abbreviations
-- *Progressive Word Highlighting*: Highlights each word as it's being spoken
-  (like read-aloud.el)
--  *Configurable*: Adjust inference steps, speed, voice styles, and highlight
+- *Progressive Chunk Highlighting*: Highlights text chunks as they're being
+  spoken with language-aware timing
+- *Configurable*: Adjust inference steps, speed, voice styles, and highlight
   colors
+
+* Supported Languages (33)
+
+Arabic (ar), Bulgarian (bg), Chinese (zh), Croatian (hr), Czech (cs), Danish (da),
+Dutch (nl), English (en), Estonian (et), Finnish (fi), French (fr), German (de),
+Greek (el), Hindi (hi), Hungarian (hu), Indonesian (id), Italian (it), Japanese
+(ja), Korean (ko), Latvian (lv), Lithuanian (lt), Polish (pl), Portuguese (pt),
+Romanian (ro), Russian (ru), Slovak (sk), Slovenian (sl), Spanish (es), Swedish
+(sv), Turkish (tr), Ukrainian (uk), Vietnamese (vi), Language-agnostic (na)
+
+*Note*: Chinese (zh) is automatically detected and internally mapped to
+language-agnostic mode ("na") for optimal Supertonic v3 processing.
 
 * Performance
 
@@ -129,20 +142,46 @@ M-x dawa-tts-compile
 ** Basic Usage
 
 #+begin_src elisp
-;; Speak text directly
+;; Speak text directly (auto-detects language)
 (dawa-tts-speak "Hello from Emacs")
+(dawa-tts-speak "你好世界")  ; Chinese
+(dawa-tts-speak "안녕하세요")  ; Korean
+
+;; Force specific language
+(dawa-tts-speak "Bonjour le monde" "fr")
+(dawa-tts-speak "Hola mundo" "es")
 
 ;; Speak current word (highlights the word)
 (dawa-tts-speak-word)
 
-;; Speak selected region (progressively highlights each word)
+;; Speak selected region (progressively highlights chunks)
 (dawa-tts-speak-region)
 
-;; Speak entire buffer (progressively highlights each word)
+;; Speak entire buffer (progressively highlights chunks)
 (dawa-tts-speak-buffer)
 
 ;; Stop playback
 (dawa-tts-stop)
+#+end_src
+
+** Language Configuration
+
+#+begin_src elisp
+;; Set buffer-local language (overrides auto-detection)
+M-x dawa-tts-lang-set RET ko RET  ; Force Korean
+
+;; Clear language override (use auto-detection)
+M-x dawa-tts-lang-clear
+
+;; Toggle auto-detection on/off
+M-x dawa-tts-lang-toggle-auto-detect
+
+;; Set default language (used when auto-detection fails)
+(setq dawa-tts-lang-default "en")  ; English (default)
+(setq dawa-tts-lang-default "na")  ; Language-agnostic mode
+
+;; Disable auto-detection (always use default)
+(setq dawa-tts-lang-auto-detect nil)
 #+end_src
 
 ** Voice Configuration
@@ -189,16 +228,15 @@ M-x dawa-tts-load-voice RET M2 RET
 
 ** Text Highlighting
 
-The progressive sentence highlighting feature provides visual feedback during speech
+The progressive chunk highlighting feature provides visual feedback during speech
 synthesis:
 
 - *Single word* (=dawa-tts-speak-word=): Highlights the word being spoken
 - *Single sentence* (=dawa-tts-speak-sentence=): Highlights the sentence being spoken
 - *Region/Buffer* (=dawa-tts-speak-region=, =dawa-tts-speak-buffer=):
-  Progressively highlights each sentence as it's spoken, synchronized with audio
-  playback. Sentence-level highlighting provides better accuracy than word-level
-  highlighting since each sentence's duration is estimated individually based on
-  character count and speech rate.
+  Progressively highlights text chunks as they're spoken, synchronized with audio
+  playback. Chunk-based highlighting provides better accuracy with language-aware
+  duration estimation (CJK languages use 120-char chunks, others use 300-char chunks).
 - Highlighting automatically disappears when playback finishes or is stopped
 
 Toggle highlighting: =M-x dawa-tts-toggle-highlight=
@@ -243,12 +281,17 @@ Toggle highlighting: =M-x dawa-tts-toggle-highlight=
 
 #+begin_example
 dawa-tts/
+├── Makefile                 # Build automation
 ├── CMakeLists.txt           # CMake build configuration
-├── dawa-tts.el              # Emacs Lisp interface
+├── dawa-tts.el              # Main Emacs Lisp interface
+├── dawa-tts-lang.el         # Language detection (32 languages)
+├── dawa-tts-chunk.el        # Smart text chunking
 ├── dawa-tts-module.cpp      # C++ dynamic module
 ├── dawa-tts-module.dylib    # Compiled module (macOS)
+├── test-dawa-tts.el         # ERT test suite (33 tests)
+├── TESTING.md               # Testing guide
 ├── lib/                     # Supertonic TTS library
-│   ├── supertonic.cpp       # Core TTS implementation
+│   ├── supertonic.cpp       # Core TTS implementation (v3)
 │   └── supertonic.h         # TTS API headers
 ├── build/                   # CMake build directory (gitignored)
 └── assets/                  # Models and voices (auto-downloaded, gitignored)
@@ -271,7 +314,13 @@ dawa-tts/
 ** Building from Source
 
 #+begin_src shell
-# Clean rebuild
+# Using Makefile (recommended)
+make build          # Build the module
+make clean          # Clean build artifacts
+make rebuild        # Clean and rebuild
+make check          # Check if module exists
+
+# Manual build
 cd build
 rm ./*
 cmake ..
@@ -281,14 +330,22 @@ cmake --build . --config Release
 ** Testing
 
 #+begin_src shell
-# Test module loading
-emacs -Q --batch -L . -l dawa-tts.el \
-  --eval "(message \"Module loaded: %s\" (fboundp 'dawa-tts-speak))"
+# Run all ERT tests (33 tests)
+make test
 
-# Test synthesis
-emacs -Q --batch -L . -l dawa-tts.el \
-  --eval "(dawa-tts-speak \"Test\")"
+# Run interactive multilingual test
+make test-interactive
+
+# Or manually
+emacs -Q --batch -l dawa-tts-lang.el -l dawa-tts-chunk.el \
+  -l test-dawa-tts.el -f ert-run-tests-batch-and-exit
+
+# Interactive test
+emacs -Q -l dawa-tts.el -l test-dawa-tts.el \
+  --eval "(dawa-tts-test-multilingual)"
 #+end_src
+
+See =TESTING.md= for comprehensive testing guide.
 
 ** Troubleshooting
 
@@ -331,6 +388,9 @@ git lfs pull
 - =dawa-tts-stop= - Stop current playback and remove highlight
 - =dawa-tts-load-voice= - Switch voice style
 - =dawa-tts-toggle-highlight= - Toggle text highlighting on/off
+- =dawa-tts-lang-set= - Set buffer-local language override
+- =dawa-tts-lang-clear= - Clear buffer-local language override
+- =dawa-tts-lang-toggle-auto-detect= - Toggle automatic language detection
 - =dawa-tts-init= - Initialize TTS engine (auto-called)
 - =dawa-tts-benchmark= - Run performance benchmark
 - =dawa-tts-cleanup-temp-files= - Clean up temporary WAV files
@@ -342,6 +402,8 @@ git lfs pull
 - =dawa-tts-speed= - Speech speed multiplier (default: 1.05)
 - =dawa-tts-auto-play= - Auto-play generated audio (default: t)
 - =dawa-tts-highlight-text= - Highlight text being spoken (default: t)
+- =dawa-tts-lang-default= - Default language code (default: "en")
+- =dawa-tts-lang-auto-detect= - Auto-detect text language (default: t)
 - =dawa-tts-assets-dir= - Path to models and voices
 - =dawa-tts-player-command= - Audio player command (default: "afplay")
 
@@ -354,7 +416,7 @@ git lfs pull
 
 - =(dawa-tts-module-init ONNX-DIR)= - Initialize ONNX Runtime
 - =(dawa-tts-module-load-voice VOICE-PATH)= - Load voice JSON
-- =(dawa-tts-module-synthesize TEXT STEPS SPEED OUTPUT-PATH)= - Generate WAV
+- =(dawa-tts-module-synthesize TEXT LANG STEPS SPEED OUTPUT-PATH)= - Generate WAV
 - =(dawa-tts-module-list-voices VOICE-DIR)= - List voice files
 - =(dawa-tts-module-cleanup)= - Clean up resources
 
