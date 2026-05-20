@@ -343,12 +343,47 @@ Uses current voice style and synthesis parameters."
           (dawa-tts-speak (thing-at-point 'sentence t)))
       (user-error "No sentence at point"))))
 
+(defun dawa-tts--normalize-text (text buffer)
+  "Normalize TEXT from BUFFER for TTS processing.
+In org-mode buffers, hard-wrapped lines (single newlines within a
+paragraph) are joined, while real paragraph breaks (two or more
+consecutive newlines) are preserved."
+  (with-current-buffer buffer
+    (if (derived-mode-p 'org-mode)
+        ;; Org-mode: join hard-wrapped lines, keep paragraph breaks
+        (with-temp-buffer
+          (insert text)
+          (goto-char (point-min))
+          ;; Replace sequences of 2+ newlines with a unique marker
+          (while (re-search-forward "\n\n\n+" nil t)
+            (replace-match "\n\n"))
+          ;; Join hard-wrapped lines: single newline followed by non-empty,
+          non-heading text
+          (goto-char (point-min))
+          (while (re-search-forward "\n" nil t)
+            (save-excursion
+              (let ((next-char (char-after)))
+                (when (and next-char
+                           (not (memq next-char '(?\n ?*)))
+                           (not (looking-at-p "[ \t]*$")))
+                  ;; This is a hard wrap, join with space
+                  (delete-char -1)
+                  ;; Don't add space if previous char is already whitespace
+                  (unless (or (= (point) (point-min))
+                              (memq (char-before (point)) '(?\s ?\t)))
+                    (insert " "))))))
+          (buffer-string))
+      ;; Non-org-mode: collapse 3+ newlines to 2
+      (replace-regexp-in-string "\n\n\n+" "\n\n" text))))
+
 ;;;###autoload
 (defun dawa-tts-speak-region (start end)
-  "Speak text in region from START to END with progressive chunk highlighting."
+  "Speak text in region from START to END with chunk highlighting."
   (interactive "r")
   (if (use-region-p)
-      (let* ((text (buffer-substring-no-properties start end))
+      (let* ((text (dawa-tts--normalize-text
+                    (buffer-substring-no-properties start end)
+                    (current-buffer)))
              (lang (or dawa-tts-lang-override
                        (dawa-tts-lang-detect text)))
              (chunk-positions (dawa-tts-chunk-text text start (current-buffer) lang)))
@@ -363,9 +398,9 @@ Uses current voice style and synthesis parameters."
 
 ;;;###autoload
 (defun dawa-tts-speak-buffer ()
-  "Speak entire buffer with progressive chunk highlighting."
+  "Speak entire buffer with chunk highlighting."
   (interactive)
-  (let* ((text (buffer-string))
+  (let* ((text (dawa-tts--normalize-text (buffer-string) (current-buffer)))
          (lang (or dawa-tts-lang-override
                    (dawa-tts-lang-detect text)))
          (chunk-positions (dawa-tts-chunk-text text (point-min) (current-buffer) lang)))
