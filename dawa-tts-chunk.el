@@ -105,33 +105,57 @@ Returns new list of chunks with (start end text) format."
 
 (defun dawa-tts-chunk--split-long-chunk (chunk max-length)
   "Split CHUNK if it exceeds MAX-LENGTH.
-CHUNK is (start end text). Returns list of chunks."
+CHUNK is (start end text). Returns list of chunks.
+Splits at sentence boundaries (punctuation) to avoid mid-word breaks."
   (let ((start (nth 0 chunk))
         (end (nth 1 chunk))
         (text (nth 2 chunk)))
     (if (<= (length text) max-length)
         (list chunk)
-      ;; Need to split - try to split at sentence boundaries
       (let ((chunks nil)
-            (current-start start)
-            (current-text "")
-            (words (split-string text)))
-        (dolist (word words)
-          (let ((new-text (if (string-empty-p current-text)
-                              word
-                            (concat current-text " " word))))
-            (if (<= (length new-text) max-length)
-                (setq current-text new-text)
-              ;; Would exceed max, save current and start new
-              (when (not (string-empty-p current-text))
-                (let ((chunk-end (+ current-start (length current-text))))
-                  (push (list current-start chunk-end current-text) chunks)
-                  (setq current-start chunk-end)))
-              (setq current-text word))))
-        ;; Save last chunk
-        (when (not (string-empty-p current-text))
-          (push (list current-start end current-text) chunks))
-        (nreverse chunks)))))
+            (pos 0))
+        (while (< pos (length text))
+          (let* ((remaining (- (length text) pos))
+                 (split-pos (if (<= remaining max-length)
+                                (length text)
+                              ;; Find sentence boundary within max-length
+                              (let ((bound (min (+ pos max-length) (length text)))
+                                    (best nil))
+                                ;; 1. Sentence-ending punctuation: .!? followed by quote + space
+                                (save-match-data
+                                  (when (string-match
+                                         "[.!?]['\"））\"'」』]*[ \t\n]"
+                                         text pos)
+                                    (let ((m (match-end 0)))
+                                      (when (<= m bound)
+                                        (setq best m)))))
+                                ;; 2. Comma/semicolon boundary
+                                (save-match-data
+                                  (when (string-match
+                                         "[,;，；][ \t\n]\\|，"
+                                         text pos)
+                                    (let ((m (match-end 0)))
+                                      (when (and (<= m bound)
+                                                 (or (null best) (> m best)))
+                                        (setq best m)))))
+                                ;; 3. Fallback: last whitespace within bound
+                                (save-match-data
+                                  (let ((last-ws nil)
+                                        (i pos))
+                                    (while (< i bound)
+                                      (when (memq (aref text i) '(?\s ?\t ?\n))
+                                        (setq last-ws (1+ i)))
+                                      (setq i (1+ i)))
+                                    (when (and last-ws (or (null best) (> last-ws best)))
+                                      (setq best last-ws))))
+                                ;; 4. Last resort
+                                (or best bound))))
+                 (chunk-text (substring text pos split-pos))
+                 (chunk-start (+ start pos))
+                 (chunk-end (+ start split-pos)))
+            (push (list chunk-start chunk-end chunk-text) chunks)
+            (setq pos split-pos))))
+        (nreverse chunks))))
 
 (defun dawa-tts-chunk-text (text start buffer &optional lang)
   "Chunk TEXT starting at START in BUFFER for language LANG.
@@ -163,31 +187,36 @@ Chunks are optimized for TTS synthesis and highlighting:
                (sentences (dawa-tts-chunk--split-by-sentences para-text para-start buffer))
                (para-chunks nil)
                (current-chunk-start nil)
+               (current-chunk-end nil)
                (current-chunk-text ""))
 
           ;; Combine sentences into chunks
           (dolist (sent sentences)
-            (let ((sent-text (nth 2 sent)))
+            (let ((sent-text (nth 2 sent))
+                  (sent-end (nth 1 sent)))
               (if (null current-chunk-start)
                   ;; Start new chunk
                   (setq current-chunk-start (nth 0 sent)
+                        current-chunk-end sent-end
                         current-chunk-text sent-text)
                 ;; Try to add to current chunk
                 (let ((new-text (concat current-chunk-text " " sent-text)))
                   (if (<= (length new-text) max-length)
-                      (setq current-chunk-text new-text)
+                      (setq current-chunk-text new-text
+                            current-chunk-end sent-end)
                     ;; Would exceed max, save current and start new
                     (push (list current-chunk-start
-                                (+ current-chunk-start (length current-chunk-text))
+                                current-chunk-end
                                 current-chunk-text)
                           para-chunks)
                     (setq current-chunk-start (nth 0 sent)
+                          current-chunk-end sent-end
                           current-chunk-text sent-text))))))
 
           ;; Save last chunk
           (when current-chunk-start
             (push (list current-chunk-start
-                        (+ current-chunk-start (length current-chunk-text))
+                        current-chunk-end
                         current-chunk-text)
                   para-chunks))
 
