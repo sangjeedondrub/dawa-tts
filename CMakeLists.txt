@@ -77,7 +77,7 @@ message(STATUS "Found nlohmann_json")
 # Find Emacs include path (for dynamic module support)
 if(APPLE)
     # Try to find emacs-plus installation
-    file(GLOB EMACS_PLUS_INCLUDE "/opt/homebrew/Cellar/emacs-plus/*/include")
+    file(GLOB EMACS_PLUS_INCLUDE "/opt/homebrew/Cellar/emacs-plus/*/include" "/Applications/Emacs.app/Contents/Resources/include")
     if(EMACS_PLUS_INCLUDE)
         list(GET EMACS_PLUS_INCLUDE 0 EMACS_INCLUDE_DIR)
         message(STATUS "Found emacs-plus include: ${EMACS_INCLUDE_DIR}")

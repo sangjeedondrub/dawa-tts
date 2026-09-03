@@ -354,24 +354,26 @@ consecutive newlines) are preserved."
         (with-temp-buffer
           (insert text)
           (goto-char (point-min))
-          ;; Replace sequences of 2+ newlines with a unique marker
+          ;; Collapse 3+ newlines to 2 (preserve paragraph breaks)
           (while (re-search-forward "\n\n\n+" nil t)
             (replace-match "\n\n"))
           ;; Join hard-wrapped lines: single newline followed by non-empty,
-          non-heading text
+          ;; non-heading, non-list text
           (goto-char (point-min))
           (while (re-search-forward "\n" nil t)
-            (save-excursion
-              (let ((next-char (char-after)))
-                (when (and next-char
-                           (not (memq next-char '(?\n ?*)))
-                           (not (looking-at-p "[ \t]*$")))
-                  ;; This is a hard wrap, join with space
-                  (delete-char -1)
-                  ;; Don't add space if previous char is already whitespace
-                  (unless (or (= (point) (point-min))
-                              (memq (char-before (point)) '(?\s ?\t)))
-                    (insert " "))))))
+            (let ((next-char (char-after)))
+              (cond
+               ;; Double newline = paragraph break, skip over it
+               ((eq next-char ?\n)
+                (forward-char 1))
+               ;; Special line (heading, list, comment), skip
+               ((memq next-char '(?\* ?# ?- ?+)))
+               ;; Hard wrap: join with space
+               (t
+                (delete-char -1)
+                (unless (or (= (point) (point-min))
+                            (memq (char-before (point)) '(?\s ?\t)))
+                  (insert " "))))))
           (buffer-string))
       ;; Non-org-mode: collapse 3+ newlines to 2
       (replace-regexp-in-string "\n\n\n+" "\n\n" text))))
