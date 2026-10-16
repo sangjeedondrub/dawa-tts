@@ -254,12 +254,16 @@ This is called automatically on first use."
         (error "ONNX models not found at %s. Please run: git clone https://huggingface.co/Supertone/supertonic assets" onnx-dir))
 
       (message "Initializing dawa-tts...")
-      (if (dawa-tts-module-init onnx-dir)
-          (progn
-            (setq dawa-tts--initialized t)
-            (dawa-tts-load-voice dawa-tts-voice-style)
-            (message "dawa-tts initialized successfully with voice %s" dawa-tts-voice-style))
-        (error "Failed to initialize dawa-tts. Check ONNX models in %s" onnx-dir)))))
+      (condition-case err
+          (if (dawa-tts-module-init onnx-dir)
+              (progn
+                (setq dawa-tts--initialized t)
+                (dawa-tts-load-voice dawa-tts-voice-style)
+                (message "dawa-tts initialized successfully with voice %s" dawa-tts-voice-style))
+            (error "Failed to initialize dawa-tts. Check ONNX models in %s" onnx-dir))
+        (error
+         (message "dawa-tts: %s — models may be corrupted, try re-downloading from huggingface.co/Supertone/supertonic"
+                  (error-message-string err)))))))
 
 ;;;###autoload
 (defun dawa-tts-load-voice (voice)
